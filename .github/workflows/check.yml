@@ -1,0 +1,79 @@
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Existing version tag to validate and build
+        type: string
+        required: false
+        default: ""
+    outputs:
+      tag:
+        value: ${{ jobs.verify.outputs.tag }}
+      commit:
+        value: ${{ jobs.verify.outputs.commit }}
+      artifact:
+        value: ${{ jobs.verify.outputs.artifact }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify and package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    concurrency:
+      group: verify-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      commit: ${{ steps.metadata.outputs.commit }}
+      artifact: release-${{ github.run_id }}-${{ github.run_attempt }}
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_tag || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install the package manager pinned in package.json
+        run: npm install --global "$(node -p "require('./package.json').packageManager")"
+      - name: Validate version and tag
+        id: metadata
+        run: node scripts/release-metadata.mjs
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Validate workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -color
+      - name: Install test browser and system dependencies
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Format, types, lint, unit tests, build and browser integration
+        run: pnpm check
+      - name: Verify and prepare release files
+        run: pnpm release:prepare
+      - name: Upload verified release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload test diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 7

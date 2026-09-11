@@ -1,0 +1,11 @@
+Privacy
+
+Wonder processes webpage content to provide translation. Translation may be triggered manually or automatically according to your settings. Text identified for translation, language parameters and associated formatting may be sent to a third-party translation service, such as Google or Edge.
+
+Opening a page in an external translation service sends that page's URL to the service.
+
+Settings, site rules and dictionaries are stored in the browser's local extension storage. Translation caches may contain source text and translated text. You can clear the translation cache in settings. Exporting a configuration backup creates a local file containing your settings.
+
+Translation requests from incognito tabs do not read or write the persistent translation cache.
+
+Third-party services receive the content submitted to them and may receive network information such as your IP address. Their handling and retention of this data are governed by their own policies; Wonder does not control those practices.
