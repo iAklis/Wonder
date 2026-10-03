@@ -43,7 +43,7 @@ jobs:
             build=false
           fi
           printf 'commit=%s\nbuild=%s\n' "$commit" "$build" >> "$GITHUB_OUTPUT"
-          printf 'Nightly commit: `%s` — build required: **%s**\n' "$commit" "$build" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Nightly commit: %s; build required: %s\n' "$commit" "$build" >> "$GITHUB_STEP_SUMMARY"
 
   verify:
     needs: changes
