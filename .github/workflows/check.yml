@@ -7,6 +7,16 @@ on:
   workflow_dispatch:
   workflow_call:
     inputs:
+      source_ref:
+        description: Immutable source commit selected by the nightly gate
+        type: string
+        required: false
+        default: ""
+      release_channel:
+        description: Release channel (stable or nightly)
+        type: string
+        required: false
+        default: stable
       release_tag:
         description: Existing version tag to validate and build
         type: string
@@ -37,10 +47,11 @@ jobs:
       artifact: release-${{ github.run_id }}-${{ github.run_attempt }}
     env:
       RELEASE_TAG: ${{ inputs.release_tag || '' }}
+      RELEASE_CHANNEL: ${{ inputs.release_channel || 'stable' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.release_tag || github.sha }}
+          ref: ${{ inputs.source_ref || inputs.release_tag || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

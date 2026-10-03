@@ -1,7 +1,7 @@
 # Notice
 
-Inspired by immersive-translate.
+Wonder uses ideas from immersive-translate.
 
-Licensed under MPL-2.0. See LICENSE.
+Wonder uses the MPL-2.0 license. Read [LICENSE](LICENSE).
 
-Third-party licenses are included in THIRD_PARTY_NOTICES.txt in release packages.
+Each release package contains third-party licenses in `THIRD_PARTY_NOTICES.txt`.

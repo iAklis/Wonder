@@ -7,6 +7,10 @@ import { pathToFileURL } from "node:url";
 
 export const browsers = ["chrome", "firefox"];
 export const digest = (data) => createHash("sha256").update(data).digest("hex");
+export function nightlyTag(commit) {
+  assert.match(commit, /^[a-f0-9]{40}$/, "Invalid nightly commit");
+  return `nightly-${commit}`;
+}
 export function validateVersion(version) {
   assert.match(
     version,
@@ -21,9 +25,18 @@ export function validateVersion(version) {
 }
 export function archiveName(metadata, browser) {
   assert.ok(browsers.includes(browser), "Unsupported browser");
-  return `${metadata.packageName}-${metadata.version}-${browser}.zip`;
+  const suffix =
+    metadata.channel === "nightly"
+      ? `-nightly-${metadata.commit.slice(0, 12)}`
+      : "";
+  return `${metadata.packageName}-${metadata.version}${suffix}-${browser}.zip`;
 }
-export async function readReleaseMetadata(cwd = process.cwd(), tag = "") {
+export async function readReleaseMetadata(
+  cwd = process.cwd(),
+  tag = "",
+  channel = "stable",
+) {
+  assert.ok(["stable", "nightly"].includes(channel), "Invalid release channel");
   const pkg = JSON.parse(await readFile(resolve(cwd, "package.json"), "utf8"));
   const manifest = JSON.parse(
     await readFile(resolve(cwd, "manifest.json"), "utf8"),
@@ -49,7 +62,10 @@ export async function readReleaseMetadata(cwd = process.cwd(), tag = "") {
       cwd,
       encoding: "utf8",
     }).trim() !== "";
-  if (tag) {
+  if (channel === "nightly") {
+    assert.equal(tag, "", "Nightly builds do not accept a stable release tag");
+    assert.equal(dirty, false, "Nightly builds require a clean working tree");
+  } else if (tag) {
     assert.equal(dirty, false, "Tagged releases require a clean working tree");
     assert.equal(
       tag,
@@ -70,9 +86,10 @@ export async function readReleaseMetadata(cwd = process.cwd(), tag = "") {
   return {
     packageName,
     version: pkg.version,
-    tag: `v${pkg.version}`,
+    tag: channel === "nightly" ? nightlyTag(commit) : `v${pkg.version}`,
     commit,
     dirty,
+    ...(channel === "nightly" ? { channel } : {}),
   };
 }
 if (
@@ -82,6 +99,7 @@ if (
   const metadata = await readReleaseMetadata(
     process.cwd(),
     process.env.RELEASE_TAG || "",
+    process.env.RELEASE_CHANNEL || "stable",
   );
   console.log(
     `Release metadata verified: ${metadata.tag} (${metadata.commit})`,

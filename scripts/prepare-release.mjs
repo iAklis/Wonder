@@ -90,8 +90,12 @@ export async function validateArchive(bytes, browser, version) {
   }
   return manifest;
 }
-export async function prepareRelease(cwd = process.cwd(), tag = "") {
-  const metadata = await readReleaseMetadata(cwd, tag);
+export async function prepareRelease(
+  cwd = process.cwd(),
+  tag = "",
+  channel = "stable",
+) {
+  const metadata = await readReleaseMetadata(cwd, tag, channel);
   // Validate both packages before replacing any previous prepared output.
   const packages = await Promise.all(
     browsers.map(async (browser) => {
@@ -130,5 +134,9 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
-  await prepareRelease(process.cwd(), process.env.RELEASE_TAG || "");
+  await prepareRelease(
+    process.cwd(),
+    process.env.RELEASE_TAG || "",
+    process.env.RELEASE_CHANNEL || "stable",
+  );
 }
