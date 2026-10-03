@@ -114,6 +114,7 @@ function mockGitHub(
     failure,
     remoteCommit = metadata.commit,
     published = false,
+    tagExists = false,
   } = {},
 ) {
   const calls = [];
@@ -122,6 +123,23 @@ function mockGitHub(
     calls.push(args);
     if (args[0] === "api" && args[1].includes("/commits/"))
       return JSON.stringify({ sha: remoteCommit });
+    if (args[0] === "api" && args[1].includes("/git/matching-refs/"))
+      return JSON.stringify(
+        tagExists ? [{ ref: `refs/tags/${metadata.tag}` }] : [],
+      );
+    if (args[0] === "api" && args[1].endsWith("/git/refs")) {
+      assert.deepEqual(args, [
+        "api",
+        "repos/owner/repository/git/refs",
+        "--method",
+        "POST",
+        "-f",
+        `ref=refs/tags/${metadata.tag}`,
+        "-f",
+        `sha=${metadata.commit}`,
+      ]);
+      return "{}";
+    }
     if (args[0] === "api") {
       gets++;
       assert.deepEqual(args, [
@@ -138,6 +156,7 @@ function mockGitHub(
           {
             tag_name: metadata.tag,
             draft: !published,
+            prerelease: metadata.channel === "nightly",
             assets: failure === "incomplete" ? [] : assets,
           },
         ],
@@ -148,9 +167,13 @@ function mockGitHub(
   };
   return { run, calls };
 }
-async function publicationFixture(t) {
+async function publicationFixture(t, channel = "stable") {
   const { root, git } = await fixture(t);
-  const metadata = await prepareRelease(root, "v0.1.0");
+  const metadata = await prepareRelease(
+    root,
+    channel === "nightly" ? "" : "v0.1.0",
+    channel,
+  );
   const directory = resolve(root, "dist/release");
   const assets = [];
   for (const name of [
@@ -174,8 +197,9 @@ async function publicationFixture(t) {
     options: {
       directory,
       repo: "owner/repository",
-      tag: "v0.1.0",
+      tag: metadata.tag,
       commit: metadata.commit,
+      channel,
     },
   };
 }
@@ -428,4 +452,114 @@ test("a tag moved during upload leaves the release unpublished", async (t) => {
     mock.calls.some((args) => args[1] === "edit"),
     false,
   );
+});
+
+test("nightly packaging keeps a numeric manifest version and records the source SHA", async (t) => {
+  const data = await publicationFixture(t, "nightly");
+  assert.equal(data.metadata.channel, "nightly");
+  assert.equal(data.metadata.tag, `nightly-${data.metadata.commit}`);
+  for (const browser of ["chrome", "firefox"]) {
+    const name = archiveName(data.metadata, browser);
+    assert.equal(
+      name,
+      `test-extension-0.1.0-nightly-${data.metadata.commit.slice(0, 12)}-${browser}.zip`,
+    );
+    await validateArchive(
+      await readFile(resolve(data.directory, name)),
+      browser,
+      "0.1.0",
+    );
+  }
+  await assert.rejects(
+    readReleaseMetadata(data.root, "v0.1.0", "nightly"),
+    /do not accept a stable release tag/,
+  );
+  await writeFile(resolve(data.root, "pending.txt"), "dirty");
+  await assert.rejects(
+    readReleaseMetadata(data.root, "", "nightly"),
+    /clean working tree/,
+  );
+});
+
+test("nightly publication tags the verified SHA and publishes a prerelease without replacing latest", async (t) => {
+  const data = await publicationFixture(t, "nightly");
+  const mock = mockGitHub(data.metadata, data.assets);
+  await publishRelease({ ...data.options, run: mock.run });
+  const tagCreation = mock.calls.findIndex((args) => args.includes("POST"));
+  const create = mock.calls.findIndex((args) => args[1] === "create");
+  assert.ok(tagCreation >= 0 && tagCreation < create);
+  assert.ok(mock.calls[tagCreation].includes(`sha=${data.metadata.commit}`));
+  for (const args of [mock.calls[create], mock.calls.at(-1)]) {
+    assert.ok(args.includes("--prerelease"));
+    assert.ok(args.includes("--latest=false"));
+    assert.equal(args.includes("--latest"), false);
+  }
+});
+
+test("nightly retries an unfinished draft and never republishes a completed release", async (t) => {
+  const data = await publicationFixture(t, "nightly");
+  const draft = mockGitHub(data.metadata, data.assets, {
+    existing: true,
+    tagExists: true,
+  });
+  await publishRelease({ ...data.options, run: draft.run });
+  assert.equal(
+    draft.calls.some((args) => args.includes("POST") || args[1] === "create"),
+    false,
+  );
+  assert.deepEqual(
+    draft.calls.filter((args) => args[0] === "release").map((args) => args[1]),
+    ["upload", "edit"],
+  );
+  const published = mockGitHub(data.metadata, data.assets, {
+    existing: true,
+    tagExists: true,
+    published: true,
+  });
+  await assert.rejects(
+    publishRelease({ ...data.options, run: published.run }),
+    /already published/,
+  );
+  assert.equal(
+    published.calls.some(
+      (args) => args[0] === "release" || args.includes("POST"),
+    ),
+    false,
+  );
+});
+
+test("nightly upload failures leave the draft retryable", async (t) => {
+  const data = await publicationFixture(t, "nightly");
+  for (const failure of ["upload", "incomplete"]) {
+    const mock = mockGitHub(data.metadata, data.assets, { failure });
+    await assert.rejects(publishRelease({ ...data.options, run: mock.run }));
+    assert.equal(
+      mock.calls.some((args) => args[1] === "edit"),
+      false,
+    );
+  }
+});
+
+test("nightly rejects wrong source commits and tampered packages before creating a tag", async (t) => {
+  const data = await publicationFixture(t, "nightly");
+  const mock = mockGitHub(data.metadata, data.assets);
+  const commit = "f".repeat(40);
+  await assert.rejects(
+    publishRelease({
+      ...data.options,
+      commit,
+      tag: `nightly-${commit}`,
+      run: mock.run,
+    }),
+  );
+  assert.equal(mock.calls.length, 0);
+  await writeFile(
+    resolve(data.directory, archiveName(data.metadata, "chrome")),
+    "tampered",
+  );
+  await assert.rejects(
+    publishRelease({ ...data.options, run: mock.run }),
+    /Size mismatch/,
+  );
+  assert.equal(mock.calls.length, 0);
 });

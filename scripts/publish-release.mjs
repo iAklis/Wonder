@@ -8,6 +8,7 @@ import {
   archiveName,
   browsers,
   digest,
+  nightlyTag,
   validateVersion,
 } from "./release-metadata.mjs";
 
@@ -16,6 +17,7 @@ export async function publishRelease({
   repo,
   tag,
   commit,
+  channel = "stable",
   run = (args) =>
     execFileSync("gh", args, {
       encoding: "utf8",
@@ -25,6 +27,9 @@ export async function publishRelease({
   assert.match(repo, /^[\w.-]+\/[\w.-]+$/, "Invalid GitHub repository");
   const metadataBytes = await readFile(resolve(directory, "release.json"));
   const metadata = JSON.parse(metadataBytes);
+  assert.ok(["stable", "nightly"].includes(channel), "Invalid release channel");
+  assert.equal(metadata.channel || "stable", channel);
+  const nightly = channel === "nightly";
   validateVersion(metadata.version);
   assert.equal(
     metadata.dirty,
@@ -32,7 +37,7 @@ export async function publishRelease({
     "Cannot publish artifacts built from uncommitted changes",
   );
   assert.match(metadata.packageName, /^[a-z0-9][a-z0-9._-]*$/);
-  assert.equal(tag, `v${metadata.version}`);
+  assert.equal(tag, nightly ? nightlyTag(commit) : `v${metadata.version}`);
   assert.equal(metadata.tag, tag);
   assert.match(commit, /^[a-f0-9]{40}$/);
   assert.equal(
@@ -68,6 +73,24 @@ export async function publishRelease({
     { name: "SHA256SUMS", size: checksum.length, sha256: digest(checksum) },
   );
   await readFile(resolve(directory, "RELEASE_NOTES.md"));
+  if (nightly) {
+    // Only successful verification may create a tag. A tag alone never marks
+    // the nightly as published, so interrupted uploads can be retried.
+    const refs = JSON.parse(
+      run(["api", `repos/${repo}/git/matching-refs/tags/${tag}`]),
+    );
+    if (!refs.some((ref) => ref.ref === `refs/tags/${tag}`))
+      run([
+        "api",
+        `repos/${repo}/git/refs`,
+        "--method",
+        "POST",
+        "-f",
+        `ref=refs/tags/${tag}`,
+        "-f",
+        `sha=${commit}`,
+      ]);
+  }
   const remote = JSON.parse(run(["api", `repos/${repo}/commits/${tag}`]));
   assert.equal(
     remote.sha,
@@ -91,13 +114,19 @@ export async function publishRelease({
     return matches[0];
   };
   const existing = findRelease();
-  if (existing)
+  if (existing) {
+    if (nightly)
+      assert.equal(
+        existing.prerelease,
+        true,
+        "Nightly tag belongs to a stable release",
+      );
     assert.equal(
       existing.draft,
       true,
       "This release is already published; use a new version instead of overwriting it",
     );
-  else
+  } else
     run([
       "release",
       "create",
@@ -106,6 +135,7 @@ export async function publishRelease({
       repo,
       "--verify-tag",
       "--draft",
+      ...(nightly ? ["--prerelease", "--latest=false"] : []),
       "--title",
       tag,
       "--generate-notes",
@@ -151,7 +181,15 @@ export async function publishRelease({
     "Remote tag moved during upload; refusing to publish",
   );
   // Keep a draft if any upload or verification fails. Never expose a partial release.
-  run(["release", "edit", tag, "--repo", repo, "--draft=false", "--latest"]);
+  run([
+    "release",
+    "edit",
+    tag,
+    "--repo",
+    repo,
+    "--draft=false",
+    ...(nightly ? ["--prerelease", "--latest=false"] : ["--latest"]),
+  ]);
   console.log(`Published ${repo} ${tag}`);
 }
 if (
@@ -163,5 +201,6 @@ if (
     repo: process.env.GH_REPO,
     tag: process.env.RELEASE_TAG,
     commit: process.env.RELEASE_COMMIT,
+    channel: process.env.RELEASE_CHANNEL || "stable",
   });
 }

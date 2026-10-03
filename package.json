@@ -17,8 +17,8 @@
     "test:e2e": "node tests/browser.mjs",
     "check": "pnpm release:check && pnpm format:check && pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e",
     "test:firefox": "node tests/firefox-smoke.mjs",
-    "format": "prettier --write \"src/ui/**/*.{ts,tsx,css}\" \"src/components/ui/*.tsx\" tests/ui-checks.mjs components.json \"scripts/*release*.mjs\" tests/release.test.mjs \".github/**/*.yml\"",
-    "format:check": "prettier --check \"src/ui/**/*.{ts,tsx,css}\" \"src/components/ui/*.tsx\" tests/ui-checks.mjs components.json \"scripts/*release*.mjs\" tests/release.test.mjs \".github/**/*.yml\"",
+    "format": "prettier --write \"src/ui/**/*.{ts,tsx,css}\" \"src/components/ui/*.tsx\" tests/ui-checks.mjs components.json \"scripts/*release*.mjs\" \"tests/*release.test.mjs\" \".github/**/*.yml\"",
+    "format:check": "prettier --check \"src/ui/**/*.{ts,tsx,css}\" \"src/components/ui/*.tsx\" tests/ui-checks.mjs components.json \"scripts/*release*.mjs\" \"tests/*release.test.mjs\" \".github/**/*.yml\"",
     "release:check": "node scripts/release-metadata.mjs",
     "release:prepare": "node scripts/prepare-release.mjs"
   },
